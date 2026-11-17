@@ -110,18 +110,38 @@ def main():
 
     pts_polygon = np.array(roi_polygon, dtype=np.int32).reshape((-1, 1, 2))
 
-    window_title = "Emergency No-Parking Alert System"
-    cv2.namedWindow(window_title)
-    cv2.setMouseCallback(window_title, on_main_mouse)
+    # ตรวจสอบการทำงานแบบ Headless Mode (รันผ่าน SSH หลังบ้านโดยไม่เปิดหน้าต่าง)
+    system_cfg = cfg.get("system", {})
+    headless_setting = system_cfg.get("headless", "auto")
+    if headless_setting is True or str(headless_setting).lower() == "true":
+        is_headless = True
+    elif headless_setting is False or str(headless_setting).lower() == "false":
+        is_headless = False
+    else:
+        if sys.platform.startswith("linux"):
+            is_headless = ("DISPLAY" not in os.environ and "WAYLAND_DISPLAY" not in os.environ)
+        else:
+            is_headless = False
 
-    print("\n[READY] System is running!")
-    print("  - คลิกปุ่ม [ SET ZONE ] บนจอ หรือกดปุ่ม 'z' เพื่อตั้งค่าจุดพื้นที่ห้ามจอดใหม่")
-    print("  - กด 't' เพื่อทดสอบส่งเสียงเตือนลำโพง")
-    print("  - กด 'q' เพื่อออกจากโปรแกรม\n")
+    window_title = "Emergency No-Parking Alert System"
+    if not is_headless:
+        cv2.namedWindow(window_title)
+        cv2.setMouseCallback(window_title, on_main_mouse)
+        print("\n[READY] System is running in GUI Mode!")
+        print("  - คลิกปุ่ม [ SET ZONE ] บนจอ หรือกดปุ่ม 'z' เพื่อตั้งค่าจุดพื้นที่ห้ามจอดใหม่")
+        print("  - กด 't' เพื่อทดสอบส่งเสียงเตือนลำโพง")
+        print("  - กด 'q' เพื่อออกจากโปรแกรม\n")
+    else:
+        print("\n[READY] System is running in HEADLESS Mode (CLI / SSH Backend)!")
+        print("  - ทำงานหลังบ้านเต็มรูปแบบโดยไม่ต้องเปิดหน้าต่าง GUI (ประหยัด CPU)")
+        print("  - ตรวจจับและส่งเสียงเตือนผ่านลำโพงอัตโนมัติ")
+        print("  - กด 'Ctrl + C' ใน Terminal เพื่อออกจากโปรแกรม\n")
+
+    last_log_time = 0.0
 
     while True:
-        # ตรวจสอบว่ามีการเรียกโหมดตั้งค่าจุดพื้นที่ห้ามจอดใหม่หรือไม่
-        if request_zone_setup:
+        # ตรวจสอบว่ามีการเรียกโหมดตั้งค่าจุดพื้นที่ห้ามจอดใหม่หรือไม่ (เฉพาะโหมด GUI)
+        if not is_headless and request_zone_setup:
             request_zone_setup = False
             ret, cur_frame = cap.read()
             new_poly = interactive_zone_setup(
@@ -192,7 +212,35 @@ def main():
                 audio_player.play()
 
         # ========================================================
-        # การวาดส่วนแสดงผล (Visual Overlay / HUD)
+        # การทำงานในโหมด Headless (แสดงผลผ่าน Terminal / SSH)
+        # ========================================================
+        if is_headless:
+            # รายงานสถานะผ่าน Terminal ทุก 2 วินาที (หากมีรถในพื้นที่)
+            if (now - last_log_time) >= 2.0:
+                last_log_time = now
+                if tracked_vehicles:
+                    status_msgs = []
+                    for v in tracked_vehicles:
+                        c_name = v['class_name']
+                        d_time = int(v['dwell_time'])
+                        v_st = v['state']
+                        if v_st == VehicleState.VIOLATION:
+                            status_msgs.append(f"[VIOLATION] รถ {c_name} จอดแช่ {d_time}s (ส่งเสียงเตือน!)")
+                        elif v_st == VehicleState.WAITING:
+                            status_msgs.append(f"[WAITING] รถ {c_name} จอดชั่วคราว {d_time}/{tracker.grace_period_sec}s")
+                        elif v_st == VehicleState.AUTHORIZED:
+                            status_msgs.append(f"[ALLOWED] รถพยาบาลฉุกเฉิน ({c_name})")
+                        else:
+                            status_msgs.append(f"[MOVING] รถ {c_name} กำลังเคลื่อนที่")
+                    print(" | ".join(status_msgs))
+                elif has_violation_active:
+                    print("[ALERT] กำลังส่งเสียงแจ้งเตือนรถฝ่าฝืน!")
+
+            time.sleep(0.01)
+            continue
+
+        # ========================================================
+        # การวาดส่วนแสดงผล (Visual Overlay / HUD สำหรับโหมด GUI)
         # ========================================================
         display = frame.copy()
         frame_w = display.shape[1]
@@ -281,8 +329,12 @@ def main():
             request_zone_setup = True
 
     cap.release()
-    cv2.destroyAllWindows()
+    if not is_headless:
+        cv2.destroyAllWindows()
     audio_player.stop()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[EXIT] ผู้ใช้กด Ctrl + C เพื่อออกจากโปรแกรม")

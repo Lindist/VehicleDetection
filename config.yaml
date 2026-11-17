@@ -1,3 +1,6 @@
+system:
+  headless: auto  # auto: ตรวจจับอัตโนมัติ (SSH จะเปิดหลังบ้าน, จอเปิด GUI), true: หลังบ้านเพียวๆ, false: เปิดหน้าต่าง
+
 camera: {source: 0, width: 640, height: 480, process_fps: 3}
 model:
   path: models/best.pt
