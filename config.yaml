@@ -1,0 +1,13 @@
+camera: {source: 0, width: 640, height: 480, process_fps: 3}
+model:
+  path: models/best.pt
+  conf: 0.45
+  authorized_classes: [ambulance]
+  unauthorized_classes: [car, bus, truck, motorcycle, van]
+parking: {grace_period_seconds: 5, movement_threshold_pixels: 25, alert_interval_seconds: 8}
+audio: {file: assets/alert.mp3, volume: 1.0}
+roi_polygon:
+- [85, 63]
+- [88, 320]
+- [552, 289]
+- [562, 68]
