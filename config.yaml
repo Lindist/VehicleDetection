@@ -1,7 +1,13 @@
 system:
   headless: auto  # auto: ตรวจจับอัตโนมัติ (SSH จะเปิดหลังบ้าน, จอเปิด GUI), true: หลังบ้านเพียวๆ, false: เปิดหน้าต่าง
 
-camera: {source: 0, width: 640, height: 480, process_fps: 3}
+camera:
+  source: 0
+  width: 640
+  height: 480
+  process_fps: 5        # ความเร็วประมวลผลเมื่อพบรถ (Active Mode)
+  idle_fps: 0.5         # ความเร็วตอนไม่มีรถ (Sleep Mode: 0.5 = ตรวจ 1 ครั้ง ทุก 2 วินาที)
+  idle_timeout: 10      # ไม่พบรถนานกี่วินาทีจึงเข้าโหมด Sleep (ใส่ 0 เพื่อปิดโหมดประหยัดพลังงาน)
 model:
   path: models/best.pt
   conf: 0.45

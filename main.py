@@ -89,10 +89,14 @@ def main():
     # 4. เปิดกล้องหรือวิดีโอ
     cam_cfg = cfg.get("camera", {})
     source = cam_cfg.get("source", 0)
-    process_fps = cam_cfg.get("process_fps", 3)
-    frame_interval = 1.0 / max(1, process_fps)
+    process_fps = float(cam_cfg.get("process_fps", 5))
+    idle_fps = float(cam_cfg.get("idle_fps", 0.5))
+    idle_timeout = float(cam_cfg.get("idle_timeout", 10.0))
 
-    print(f"[CAMERA] Connecting to source: {source} (Processing at {process_fps} FPS to save CPU)...")
+    active_interval = 1.0 / max(0.1, process_fps)
+    idle_interval = (1.0 / max(0.1, idle_fps)) if (idle_fps > 0 and idle_timeout > 0) else active_interval
+
+    print(f"[CAMERA] Connecting to source: {source} (Active: {process_fps:g} FPS | Sleep: {idle_fps:g} FPS after {idle_timeout:g}s idle)...")
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         print(f"[ERROR] Cannot open camera/video from: {source}")
@@ -102,8 +106,13 @@ def main():
     if isinstance(source, int):
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam_cfg.get("width", 640))
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cam_cfg.get("height", 480))
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     last_process_time = 0.0
+    last_detection_time = time.time()
+    is_idle_mode = False
+    target_classes = tracker.authorized_classes | tracker.unauthorized_classes
+
     tracked_vehicles = []
     violations = []
     has_violation_active = False
@@ -162,6 +171,21 @@ def main():
             cv2.setMouseCallback(window_title, on_main_mouse)
             continue
 
+        now = time.time()
+        current_interval = idle_interval if is_idle_mode else active_interval
+
+        # ในโหมด Headless ให้พัก CPU จริงๆ (Sleep) ระหว่างรอรอบตรวจจับถัดไปเพื่อประหยัดพลังงานสูงสุด
+        if is_headless:
+            time_until_next = current_interval - (now - last_process_time)
+            if time_until_next > 0:
+                time.sleep(min(0.2, time_until_next))
+                continue
+
+            # เคลียร์เฟรมเก่าที่ค้างอยู่ในบัฟเฟอร์กล้อง (กรณีเพิ่งตื่นจาก Sleep Mode)
+            if isinstance(source, int) and is_idle_mode:
+                for _ in range(2):
+                    cap.grab()
+
         ret, frame = cap.read()
         if not ret:
             if not isinstance(source, int):
@@ -173,8 +197,8 @@ def main():
 
         now = time.time()
         
-        # ควบคุมอัตราการรันโมเดล (ประหยัดพลังงานบน Raspberry Pi 4)
-        if (now - last_process_time) >= frame_interval:
+        # ควบคุมอัตราการรันโมเดล (สลับ Active FPS / Sleep FPS อัตโนมัติ)
+        if (now - last_process_time) >= current_interval:
             last_process_time = now
 
             try:
@@ -210,6 +234,19 @@ def main():
             has_violation_active = (len(violations) > 0)
             if has_violation_active:
                 audio_player.play()
+
+            # ระบบจัดการประหยัดพลังงานอัตโนมัติ (Adaptive FPS: Active <-> Sleep Mode)
+            has_any_vehicle = any(d['class_name'].lower() in target_classes for d in detections) or (len(tracked_vehicles) > 0)
+            if has_any_vehicle or has_violation_active:
+                last_detection_time = now
+                if is_idle_mode:
+                    is_idle_mode = False
+                    print(f"[POWER] >>> พบยานพาหนะ! ตื่นเข้าสู่โหมด Active ({process_fps:g} FPS) <<<")
+            else:
+                if idle_timeout > 0 and idle_fps > 0 and (now - last_detection_time) >= idle_timeout:
+                    if not is_idle_mode:
+                        is_idle_mode = True
+                        print(f"[POWER] ไม่พบรถเกิน {idle_timeout:g} วินาที -> เข้าสู่โหมดประหยัดพลังงาน Sleep Mode ({idle_fps:g} FPS)")
 
         # ========================================================
         # การทำงานในโหมด Headless (แสดงผลผ่าน Terminal / SSH)
@@ -313,6 +350,14 @@ def main():
                                (btn_set_zone[2], btn_set_zone[3]), (255, 255, 255), 1)
         cv2.putText(display, "SET ZONE (Z)", (btn_set_zone[0] + 18, btn_set_zone[1] + 21),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
+
+        # 4. แสดงสถานะประหยัดพลังงานมุมซ้ายล่าง (Active / Sleep Mode)
+        power_text = f"POWER: SLEEP ({idle_fps:g} FPS)" if is_idle_mode else f"POWER: ACTIVE ({process_fps:g} FPS)"
+        power_color = (180, 180, 180) if is_idle_mode else (0, 255, 120)
+        frame_h = display.shape[0]
+        cv2.rectangle(display, (10, frame_h - 34), (245, frame_h - 8), (20, 20, 20), -1)
+        cv2.putText(display, power_text, (18, frame_h - 16),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, power_color, 1)
 
         # แสดงหน้าต่าง
         cv2.imshow(window_title, display)
