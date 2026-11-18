@@ -27,6 +27,12 @@ Evaluation_of_a_Vehicle_Parking_Violation_Detection_and_Reporting_System/
 ### 1. ติดตั้งไลบรารีที่จำเป็น
 
 ```bash
+# 1. สร้างและเปิดใช้งาน venv
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. ติดตั้งไลบรารีทั้งหมด
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
@@ -102,10 +108,6 @@ python main.py
 
 1. **ลำโพง**: สามารถต่อลำโพงผ่านช่อง **3.5mm Audio Jack** หรือ **USB Speaker** ก็ได้ หากต่อ 3.5mm อย่าลืมตั้งค่า Output Audio ให้เป็น Headphones/Jack ด้วยคำสั่ง `raspi-config`
 2. **การเพิ่มความเร็ว 2-3 เท่าด้วย NCNN**:
-   หลังจากวางไฟล์ `models/best.pt` แล้ว สามารถสั่งแปลงเป็นโมเดล NCNN สำหรับ CPU ARM64 ของ Pi 4 ได้ด้วยคำสั่ง:
-   ```python
-   from ultralytics import YOLO
-   model = YOLO("models/best.pt")
-   model.export(format="ncnn")
-   ```
+
+python -c "from ultralytics import YOLO; YOLO('models/best.pt').export(format='ncnn')"
    แล้วเปลี่ยน `model.path: "models/best_ncnn_model"` ใน `config.yaml`
