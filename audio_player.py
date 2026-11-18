@@ -31,7 +31,15 @@ class AudioAlertPlayer:
         try:
             import pygame
             if not pygame.mixer.get_init():
-                pygame.mixer.init()
+                # กำหนด Audio Driver สำหรับ Linux/Raspberry Pi
+                if "SDL_AUDIODRIVER" not in os.environ:
+                    os.environ["SDL_AUDIODRIVER"] = "alsa"
+                try:
+                    pygame.mixer.init()
+                except Exception:
+                    # กรณีค่าเริ่มต้นไม่ผ่าน ให้ลองกำหนด buffer และ sample rate สำหรับ Pi
+                    pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=4096)
+
             if os.path.exists(self.audio_file):
                 pygame.mixer.music.load(self.audio_file)
                 pygame.mixer.music.set_volume(self.volume)
@@ -41,6 +49,7 @@ class AudioAlertPlayer:
                 print(f"[WARN] Audio file not found: {self.audio_file}")
         except Exception as e:
             print(f"[ERROR] pygame mixer init failed: {e}")
+            print("[INFO] Fallback to system audio player (aplay / mpg123 / ffplay) enabled.")
             self.is_ready = False
 
     def play(self, force=False):
@@ -66,6 +75,16 @@ class AudioAlertPlayer:
                 if not pygame.mixer.music.get_busy():
                     pygame.mixer.music.play()
                     print("[ALARM] >>> Playing warning sound: EMERGENCY VEHICLE ZONE ONLY! <<<")
+            else:
+                # ระบบสำรองกรณี pygame เข้าถึงการ์ดเสียงใน systemd ไม่ได้ (รันคำสั่งตรงของ Linux)
+                import subprocess
+                if os.path.exists(self.audio_file):
+                    print("[ALARM] >>> Playing warning sound via fallback CLI player <<<")
+                    if self.audio_file.endswith(".wav"):
+                        subprocess.Popen(["aplay", "-q", self.audio_file])
+                    elif self.audio_file.endswith(".mp3"):
+                        # ลอง mpg123 หรือ ffplay
+                        subprocess.Popen(f"mpg123 -q '{self.audio_file}' || ffplay -nodisp -autoexit -loglevel quiet '{self.audio_file}'", shell=True)
         except Exception as e:
             print(f"[ERROR] Audio playback error: {e}")
 
